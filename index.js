@@ -66,6 +66,15 @@ async function initDB() {
       last_worn TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS wear_log (
+      id BIGINT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      outfit_id BIGINT,
+      outfit_name TEXT,
+      item_ids BIGINT[],
+      worn_date TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
   console.log('Database initialized!');
 }
@@ -177,6 +186,34 @@ app.put('/outfits/:id', async (req, res) => {
 app.delete('/outfits/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM outfits WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// === WEAR LOG ===
+
+app.get('/wear-log/:userId', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM wear_log WHERE user_id = $1 ORDER BY worn_date DESC',
+      [req.params.userId]
+    );
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/wear-log', async (req, res) => {
+  try {
+    const { id, userId, outfitId, outfitName, itemIds, wornDate } = req.body;
+    await pool.query(
+      `INSERT INTO wear_log (id, user_id, outfit_id, outfit_name, item_ids, worn_date)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, userId, outfitId, outfitName, itemIds, wornDate]
+    );
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
