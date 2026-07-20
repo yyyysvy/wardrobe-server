@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
+const { Telegraf, Markup } = require('telegraf');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -182,7 +183,29 @@ app.delete('/outfits/:id', async (req, res) => {
   }
 });
 
-// Start
+// === TELEGRAM BOT ===
+
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+bot.start((ctx) => {
+  ctx.reply(
+    '🌸 Hi! I am your digital wardrobe.\n\n✨ Tap the button below to open your wardrobe! ✨',
+    Markup.inlineKeyboard([
+      Markup.button.webApp('👗 Open Wardrobe', process.env.MINIAPP_URL)
+    ])
+  );
+});
+
+bot.help((ctx) => {
+  ctx.reply('✨ I am your digital wardrobe. Tap /start to open the app! ✨');
+});
+
+// Start everything
 initDB().then(() => {
   app.listen(port, () => console.log(`Server running on port ${port}`));
+  bot.launch();
+  console.log('Telegram bot started!');
 });
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
