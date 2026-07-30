@@ -75,6 +75,7 @@ async function initDB() {
       worn_date TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS photo_public_id TEXT;
   `);
   console.log('Database initialized!');
 }
@@ -100,6 +101,7 @@ app.post('/items', async (req, res) => {
   try {
     const { id, userId, name, category, seasons, washAfter, photo } = req.body;
     let photoUrl = null;
+    let photoPublicId = null;
 
     if (photo) {
       const uploaded = await cloudinary.uploader.upload(photo, {
@@ -107,12 +109,13 @@ app.post('/items', async (req, res) => {
         transformation: [{ width: 600, height: 800, crop: 'limit', quality: 70 }]
       });
       photoUrl = uploaded.secure_url;
+      photoPublicId = uploaded.public_id;
     }
 
     await pool.query(
-      `INSERT INTO items (id, user_id, name, category, seasons, wash_after, photo_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, userId, name, category, seasons, washAfter, photoUrl]
+      `INSERT INTO items (id, user_id, name, category, seasons, wash_after, photo_url, photo_public_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, userId, name, category, seasons, washAfter, photoUrl, photoPublicId]
     );
     res.json({ success: true, photoUrl });
   } catch (e) {
@@ -135,6 +138,17 @@ app.put('/items/:id', async (req, res) => {
 
 app.delete('/items/:id', async (req, res) => {
   try {
+    const existing = await pool.query('SELECT photo_public_id FROM items WHERE id = $1', [req.params.id]);
+    const publicId = existing.rows[0]?.photo_public_id;
+
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cloudErr) {
+        console.error('Failed to delete photo from Cloudinary:', cloudErr.message);
+      }
+    }
+
     await pool.query('DELETE FROM items WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (e) {
