@@ -76,6 +76,10 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE items ADD COLUMN IF NOT EXISTS photo_public_id TEXT;
+    ALTER TABLE outfits ADD COLUMN IF NOT EXISTS temp_min INTEGER;
+    ALTER TABLE outfits ADD COLUMN IF NOT EXISTS temp_max INTEGER;
+    ALTER TABLE outfits ADD COLUMN IF NOT EXISTS rain_ok BOOLEAN DEFAULT TRUE;
+    ALTER TABLE outfits ADD COLUMN IF NOT EXISTS snow_ok BOOLEAN DEFAULT TRUE;
   `);
   console.log('Database initialized!');
 }
@@ -158,6 +162,45 @@ app.delete('/items/:id', async (req, res) => {
 
 // === OUTFITS ===
 
+app.post('/outfits/analyze', async (req, res) => {
+  try {
+    const { items } = req.body;
+    const itemsDescription = items.map(i => `${i.name} (${i.category})`).join(', ');
+    const prompt = `You are an expert stylist and meteorologist. Analyze this complete outfit worn together as one combination: ${itemsDescription}.
+
+Think about the outfit as a whole (layering, coverage, materials implied by the item types), not each item in isolation.
+Estimate a realistic outdoor temperature comfort range in Celsius — typically an 8-12°C span, not wider unless the outfit is genuinely versatile (e.g. includes a removable layer like a jacket).
+Also decide if this outfit is practical to wear in rain (rainOk) and in snow (snowOk) — consider footwear and outer layers specifically. An outfit with open shoes or no jacket should have rainOk/snowOk as false. An outfit with boots and a coat can have them true.
+
+Respond ONLY with valid JSON in this exact format, with no other text, no markdown formatting, no code fences, no explanation:
+{"tempMin": <integer>, "tempMax": <integer>, "rainOk": <true or false>, "snowOk": <true or false>}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      }
+    );
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const cleaned = text.replace(/```json|```/g, '').trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error('Gemini returned non-JSON response:', text);
+      return res.status(500).json({ error: 'AI returned an unexpected response, please try again' });
+    }
+
+    res.json(parsed);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/outfits/:userId', async (req, res) => {
   try {
     const result = await pool.query(
@@ -172,11 +215,11 @@ app.get('/outfits/:userId', async (req, res) => {
 
 app.post('/outfits', async (req, res) => {
   try {
-    const { id, userId, name, itemIds, seasons, weather, occasions } = req.body;
+    const { id, userId, name, itemIds, seasons, occasions, tempMin, tempMax, rainOk, snowOk } = req.body;
     await pool.query(
-      `INSERT INTO outfits (id, user_id, name, item_ids, seasons, weather, occasions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, userId, name, itemIds, seasons, weather, occasions]
+      `INSERT INTO outfits (id, user_id, name, item_ids, seasons, occasions, temp_min, temp_max, rain_ok, snow_ok)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [id, userId, name, itemIds, seasons, occasions, tempMin, tempMax, rainOk, snowOk]
     );
     res.json({ success: true });
   } catch (e) {
