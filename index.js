@@ -184,14 +184,19 @@ Respond ONLY with valid JSON in this exact format, with no other text, no markdo
       }
     );
     const data = await response.json();
+    console.log('Gemini raw response:', JSON.stringify(data));
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const cleaned = text.replace(/```json|```/g, '').trim();
 
+    // Вытаскиваем именно JSON-объект из текста, даже если вокруг есть лишние слова
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
     let parsed;
     try {
-      parsed = JSON.parse(cleaned);
+      if (!jsonMatch) throw new Error('No JSON object found in response');
+      parsed = JSON.parse(jsonMatch[0]);
     } catch (parseErr) {
-      console.error('Gemini returned non-JSON response:', text);
+      console.error('Gemini returned non-JSON response. Full text was:', text);
       return res.status(500).json({ error: 'AI returned an unexpected response, please try again' });
     }
 
