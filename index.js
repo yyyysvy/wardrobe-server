@@ -200,7 +200,63 @@ Respond ONLY with valid JSON in this exact format, with no other text, no markdo
       return res.status(500).json({ error: 'AI returned an unexpected response, please try again' });
     }
 
-    res.json(parsed);
+        res.json(parsed);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/outfits/generate', async (req, res) => {
+  try {
+    const { items, temperature, season, excludeCombos } = req.body;
+
+    const itemsList = items.map(i => `id:${i.id} — ${i.name} (${i.category})`).join('\n');
+    const excludeText = excludeCombos && excludeCombos.length > 0
+      ? `\n\nDo NOT repeat these exact combinations of item ids already suggested: ${JSON.stringify(excludeCombos)}. Come up with a different combination.`
+      : '';
+
+    const prompt = `You are an expert stylist. Here is a list of clothing items available in a wardrobe, each with a unique id:
+${itemsList}
+
+Current outdoor temperature: ${temperature}°C. Current season: ${season}.
+
+Create ONE stylish, coherent outfit combination using 2 to 5 of these items (by their id) that would be comfortable and appropriate for this temperature and season. Only use item ids from the list above — never invent new ones. Also give the outfit a short creative name (2-4 words), and pick the single most fitting occasion from this exact list: Beach, Casual, City break, Cycling, Dinner, Evening out, Flight, Formal, Friends, Gym, Hiking, Loungewear, Party, Smart casual, Sport, Travel, Walk, Weekend, Work, Work from home, Yoga.${excludeText}
+
+Respond ONLY with valid JSON in this exact format, with no other text, no markdown, no code fences:
+{"name": "<outfit name>", "itemIds": [<id>, <id>, ...], "occasion": "<one occasion from the list>"}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      }
+    );
+    const data = await response.json();
+    console.log('Gemini generate raw response:', JSON.stringify(data));
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const cleaned = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+    let parsed;
+    try {
+      if (!jsonMatch) throw new Error('No JSON object found in response');
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      console.error('Gemini returned non-JSON response for generate. Full text was:', text);
+      return res.status(500).json({ error: 'AI returned an unexpected response, please try again' });
+    }
+
+    // Проверяем, что все ID вещей реально существуют в списке, который мы отправляли
+    const validIds = new Set(items.map(i => Number(i.id)));
+    const filteredIds = (parsed.itemIds || []).map(Number).filter(id => validIds.has(id));
+
+    if (filteredIds.length < 2) {
+      return res.status(500).json({ error: 'AI could not form a valid outfit, please try again' });
+    }
+
+    res.json({ name: parsed.name, itemIds: filteredIds, occasion: parsed.occasion });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
